@@ -3,4 +3,8 @@ PROJECT(stator_gen)
 
 SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -std=c++11")
 
+ADD_LIBRARY(polyclipping STATIC clipper.cpp)
+SET_TARGET_PROPERTIES(polyclipping PROPERTIES VERSION 19.0.0 SOVERSION 19 )
+
 ADD_EXECUTABLE(stator_gen stator_gen.cpp)
+TARGET_LINK_LIBRARIES(stator_gen polyclipping)

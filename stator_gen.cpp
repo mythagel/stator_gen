@@ -12,7 +12,13 @@
 
 
 #define JC_VORONOI_IMPLEMENTATION
+#define JCV_REAL_TYPE double
+#define JCV_FABS fabs
+#define JCV_ATAN2 atan2
 #include "jc_voronoi.h"
+
+#include "clipper.hpp"
+namespace cl = ClipperLib;
 
 inline std::string r6(double v) {
     std::ostringstream ss;
@@ -69,7 +75,7 @@ void bezier_curve_to(bool abs, float x1, float y1, float x, float y) {
 
 int main() {
     std::vector<polar_point> points;
-    double r = 60;  // mm
+    double r = 90/2;  // mm
 
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -108,40 +114,103 @@ int main() {
             for (unsigned i = 0; i < 18; ++i) {
                 int pointoffset = 0;
                 jcv_points.emplace_back();
-                jcv_points.back().x = (float)(pointoffset + rand() % (70-2*pointoffset));
-                jcv_points.back().y = (float)(pointoffset + rand() % (70-2*pointoffset));
+                jcv_points.back().x = (float)(pointoffset + rand() % ((int)(r*2)-2*pointoffset));
+                jcv_points.back().y = (float)(pointoffset + rand() % ((int)(r*2)-2*pointoffset));
             }
         }
 
         jcv_diagram diagram;
         std::memset(&diagram, 0, sizeof diagram);
-        jcv_diagram_generate(jcv_points.size(), jcv_points.data(), 80, 80, &diagram);
+        jcv_diagram_generate(jcv_points.size(), jcv_points.data(), r*2, r*2, &diagram);
 
         auto sites = jcv_diagram_get_sites(&diagram);
-        for (unsigned i = 0; i < diagram.numsites; ++i) {
-            auto site = &sites[i];
-            for (auto e = site->edges; e; e = e->next) {
-                auto p = point{site->p.x, site->p.y};
-                auto m0 = lerp(p, {e->pos[0].x, e->pos[0].y}, 0.92);
-                auto m1 = lerp(p, {e->pos[1].x, e->pos[1].y}, 0.92);
-                e->pos[0].x = m0.x;
-                e->pos[0].y = m0.y;
-                e->pos[1].x = m1.x;
-                e->pos[1].y = m1.y;
+
+        bool reduce = false;
+        if (reduce) {
+            for (int i = 0; i < diagram.numsites; ++i) {
+                auto site = &sites[i];
+                for (auto e = site->edges; e; e = e->next) {
+                    auto p = point{site->p.x, site->p.y};
+                    auto m0 = lerp(p, {e->pos[0].x, e->pos[0].y}, 0.92);
+                    auto m1 = lerp(p, {e->pos[1].x, e->pos[1].y}, 0.92);
+                    e->pos[0].x = m0.x;
+                    e->pos[0].y = m0.y;
+                    e->pos[1].x = m1.x;
+                    e->pos[1].y = m1.y;
+                }
             }
         }
-        for (unsigned i = 0; i < diagram.numsites; ++i) {
-            auto site = &sites[i];
 
-            auto first = lerp({site->edges->pos[0].x, site->edges->pos[0].y}, {site->edges->pos[1].x, site->edges->pos[1].y}, 0.5);
-            std::cout << "G0" << " X" << std::fixed << first.x << " Y" << first.y << "\n";
-            pos = first;
+        bool bezier = false;
+        if (bezier) {
+            for (int i = 0; i < diagram.numsites; ++i) {
+                auto site = &sites[i];
 
-            for (auto e = site->edges; e; e = e->next) {
-                auto m0 = lerp({e->pos[0].x, e->pos[0].y}, {e->pos[1].x, e->pos[1].y}, 0.5);
-                auto next = e->next ? e->next : site->edges;
-                auto m1 = lerp({next->pos[0].x, next->pos[0].y}, {next->pos[1].x, next->pos[1].y}, 0.5);
-                bezier_curve_to(true, e->pos[1].x, e->pos[1].y, m1.x, m1.y);
+                auto first = lerp({site->edges->pos[0].x, site->edges->pos[0].y}, {site->edges->pos[1].x, site->edges->pos[1].y}, 0.5);
+                std::cout << "G0" << " X" << std::fixed << first.x << " Y" << first.y << "\n";
+                pos = first;
+
+                for (auto e = site->edges; e; e = e->next) {
+                    auto next = e->next ? e->next : site->edges;
+                    auto m1 = lerp({next->pos[0].x, next->pos[0].y}, {next->pos[1].x, next->pos[1].y}, 0.5);
+                    bezier_curve_to(true, e->pos[1].x, e->pos[1].y, m1.x, m1.y);
+                }
+            }
+        } else {
+
+            double scale = 10e12;
+            auto scale_point = [&](const jcv_point& p) -> cl::IntPoint {
+                return cl::IntPoint(p.x * scale, p.y * scale);
+            };
+
+            cl::Path clip;
+            for (double t = 0; t < 2*PI; t += 0.03) {
+                auto x = r * std::cos(t);
+                auto y = r * std::sin(t);
+                clip.push_back(scale_point({x + r, y + r}));
+            }
+
+            for (int i = 0; i < diagram.numsites; ++i) {
+                auto site = &sites[i];
+
+                /* TODO create clipper path for each site, offset inwards, then output
+                 * */
+
+                cl::Paths paths;
+                paths.emplace_back();
+                auto first = site->edges->pos[0];
+                paths.back().push_back(scale_point(first));
+
+                for (auto e = site->edges; e; e = e->next) {
+                    paths.back().push_back(scale_point(e->pos[1]));
+                }
+
+                cl::Clipper clipper;
+                clipper.AddPaths(paths, cl::ptSubject, true);
+                clipper.AddPath(clip, cl::ptClip, true);
+                paths.clear();
+                clipper.Execute(cl::ctIntersection, paths);
+
+                cl::ClipperOffset co;
+                co.AddPaths(paths, cl::jtRound, cl::etClosedPolygon);
+                co.ArcTolerance = 0.1 * scale;
+
+                double offset = -1.5;
+                cl::Paths solution;
+                co.Execute(solution, offset * scale);
+                cl::CleanPolygons(solution);
+
+                for(auto& path : solution) {
+
+                    std::cout << std::fixed << "G00 X" << static_cast<double>(path.begin()->X)/scale << " Y" << static_cast<double>(path.begin()->Y)/scale << "\n";
+                    for(auto& p : path) {
+                        std::cout << std::fixed << "G01 X" << static_cast<double>(p.X)/scale << " Y" << static_cast<double>(p.Y)/scale << " F50\n";
+                    }
+                    std::cout << std::fixed << "G01 X" << static_cast<double>(path.begin()->X)/scale << " Y" << static_cast<double>(path.begin()->Y)/scale << "\n";
+                    std::cout << "\n";
+                }
+
+
             }
         }
 
