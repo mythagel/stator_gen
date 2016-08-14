@@ -20,6 +20,10 @@
 #include "clipper.hpp"
 namespace cl = ClipperLib;
 
+
+bool output_profile = false;
+bool output_drill = true;
+
 inline std::string r6(double v) {
     std::ostringstream ss;
     ss << std::fixed << std::setprecision(6) << v;
@@ -42,7 +46,7 @@ struct polar_point {
 
 double distance(const point& p0, const point& p1) {
     auto x = p1.x - p0.x;
-    auto y = p1.x - p0.y;
+    auto y = p1.y - p0.y;
     return std::abs(std::sqrt(x*x + y*y));
 }
 
@@ -162,55 +166,136 @@ int main() {
             auto scale_point = [&](const jcv_point& p) -> cl::IntPoint {
                 return cl::IntPoint(p.x * scale, p.y * scale);
             };
+            auto unscale = [&](const cl::IntPoint& p) -> point {
+                return {static_cast<double>(p.X) / scale, static_cast<double>(p.Y) / scale};
+            };
 
-            cl::Path clip;
+            cl::Path circle_clip;
             for (double t = 0; t < 2*PI; t += 0.03) {
                 auto x = r * std::cos(t);
                 auto y = r * std::sin(t);
-                clip.push_back(scale_point({x + r, y + r}));
+                circle_clip.push_back(scale_point({x + r, y + r}));
             }
 
-            for (int i = 0; i < diagram.numsites; ++i) {
-                auto site = &sites[i];
+            double offset = -1.5;
 
-                /* TODO create clipper path for each site, offset inwards, then output
-                 * */
+            if (output_profile) {
+                for (int i = 0; i < diagram.numsites; ++i) {
+                    auto site = &sites[i];
 
-                cl::Paths paths;
-                paths.emplace_back();
-                auto first = site->edges->pos[0];
-                paths.back().push_back(scale_point(first));
+                    /* create clipper path for each site, offset inwards, then output */
 
-                for (auto e = site->edges; e; e = e->next) {
-                    paths.back().push_back(scale_point(e->pos[1]));
-                }
+                    cl::Paths paths;
+                    paths.emplace_back();
+                    auto first = site->edges->pos[0];
+                    paths.back().push_back(scale_point(first));
 
-                cl::Clipper clipper;
-                clipper.AddPaths(paths, cl::ptSubject, true);
-                clipper.AddPath(clip, cl::ptClip, true);
-                paths.clear();
-                clipper.Execute(cl::ctIntersection, paths);
-
-                cl::ClipperOffset co;
-                co.AddPaths(paths, cl::jtRound, cl::etClosedPolygon);
-                co.ArcTolerance = 0.1 * scale;
-
-                double offset = -1.5;
-                cl::Paths solution;
-                co.Execute(solution, offset * scale);
-                cl::CleanPolygons(solution);
-
-                for(auto& path : solution) {
-
-                    std::cout << std::fixed << "G00 X" << static_cast<double>(path.begin()->X)/scale << " Y" << static_cast<double>(path.begin()->Y)/scale << "\n";
-                    for(auto& p : path) {
-                        std::cout << std::fixed << "G01 X" << static_cast<double>(p.X)/scale << " Y" << static_cast<double>(p.Y)/scale << " F50\n";
+                    for (auto e = site->edges; e; e = e->next) {
+                        paths.back().push_back(scale_point(e->pos[1]));
                     }
-                    std::cout << std::fixed << "G01 X" << static_cast<double>(path.begin()->X)/scale << " Y" << static_cast<double>(path.begin()->Y)/scale << "\n";
-                    std::cout << "\n";
+
+                    cl::Clipper clipper;
+                    clipper.AddPaths(paths, cl::ptSubject, true);
+                    clipper.AddPath(circle_clip, cl::ptClip, true);
+                    paths.clear();
+                    clipper.Execute(cl::ctIntersection, paths);
+
+                    cl::ClipperOffset co;
+                    co.AddPaths(paths, cl::jtRound, cl::etClosedPolygon);
+                    co.ArcTolerance = 0.1 * scale;
+                    cl::Paths solution;
+                    co.Execute(solution, offset * scale);
+                    cl::CleanPolygons(solution);
+
+                    for(auto& path : solution) {
+
+                        std::cout << std::fixed << "G00 X" << static_cast<double>(path.begin()->X)/scale << " Y" << static_cast<double>(path.begin()->Y)/scale << "\n";
+                        for(auto& p : path) {
+                            std::cout << std::fixed << "G01 X" << static_cast<double>(p.X)/scale << " Y" << static_cast<double>(p.Y)/scale << " F50\n";
+                        }
+                        std::cout << std::fixed << "G01 X" << static_cast<double>(path.begin()->X)/scale << " Y" << static_cast<double>(path.begin()->Y)/scale << "\n";
+                        std::cout << "\n";
+                    }
                 }
+            }
+            if (output_drill) {
+                for (int i = 0; i < diagram.numsites; ++i) {
+                    auto site = &sites[i];
 
+                    double drill_diameter = 1;
+                    double drill_offset = drill_diameter;
 
+                    cl::Paths clip;
+                    clip.emplace_back();
+                    auto first = site->edges->pos[0];
+                    clip.back().push_back(scale_point(first));
+                    for (auto e = site->edges; e; e = e->next) {
+                        clip.back().push_back(scale_point(e->pos[1]));
+                    }
+
+                    cl::Clipper clipper;
+                    clipper.AddPaths(clip, cl::ptSubject, true);
+                    clipper.AddPath(circle_clip, cl::ptClip, true);
+                    clip.clear();
+                    clipper.Execute(cl::ctIntersection, clip);
+
+                    if (clip.empty())
+                        continue;
+
+                    cl::ClipperOffset co;
+                    co.AddPaths(clip, cl::jtRound, cl::etClosedPolygon);
+                    co.ArcTolerance = 0.1 * scale;
+                    clip.clear();
+                    co.Execute(clip, offset * scale);
+                    cl::CleanPolygons(clip);
+
+                    cl::Paths paths;
+                    paths.emplace_back();
+                    for (double t = 0; t < 2*PI; t += 0.003) {
+                        auto x = (drill_diameter/2) * std::cos(t);
+                        auto y = (drill_diameter/2) * std::sin(t);
+                        paths.back().push_back(scale_point({x + site->p.x, y + site->p.y}));
+                    }
+
+                    while (true) {
+                        cl::Paths solution;
+                        cl::ClipperOffset co;
+                        co.AddPaths(paths, cl::jtRound, cl::etClosedPolygon);
+                        co.ArcTolerance = 0.1 * scale;
+
+                        co.Execute(solution, drill_offset * scale);
+
+                        cl::Clipper clipper;
+                        clipper.AddPaths(solution, cl::ptSubject, true);
+                        clipper.AddPaths(clip, cl::ptClip, true);
+                        solution.clear();
+                        clipper.Execute(cl::ctIntersection, solution);
+
+                        if (solution == clip)
+                            break;
+
+                        for(auto& path : solution) {
+                            if (path.empty())
+                                continue;
+
+                            double dist = 0;
+                            auto last_point = unscale(*path.begin());
+                            for(auto& p : path) {
+                                dist += distance(unscale(p), last_point);
+                                last_point = unscale(p);
+
+                                if (dist > drill_diameter) {
+                                    std::cout << "G83 X" << std::fixed << last_point.x << " Y" << last_point.y << " Z-1 R1 Q0.5 F50" << '\n';
+                                    dist = 0;
+                                }
+                            }
+                            std::cout << "\n";
+                        }
+    //                   std::cout << "G83 X" << std::fixed << site->p.x << " Y" << site->p.y << " Z-1 R1 Q0.5 F50" << '\n';
+
+                        drill_offset += drill_diameter;
+                    }
+                }
             }
         }
 
