@@ -223,7 +223,6 @@ int main() {
                     auto site = &sites[i];
 
                     double drill_diameter = 1;
-                    double drill_offset = drill_diameter;
 
                     cl::Paths clip;
                     clip.emplace_back();
@@ -249,49 +248,42 @@ int main() {
                     co.Execute(clip, offset * scale);
                     cl::CleanPolygons(clip);
 
-                    cl::Paths paths;
-                    paths.emplace_back();
-                    for (double t = 0; t < 2*PI; t += 0.003) {
-                        auto x = (drill_diameter/2) * std::cos(t);
-                        auto y = (drill_diameter/2) * std::sin(t);
-                        paths.back().push_back(scale_point({x + site->p.x, y + site->p.y}));
-                    }
+                    // random depth - number of inscribed circles for maximum voronoi cell dimensions
+                    double drill_offset = drill_diameter;
+                    for(unsigned depth = 0; depth < 100; ++depth) {
 
-                    while (true) {
-                        cl::Paths solution;
-                        cl::ClipperOffset co;
-                        co.AddPaths(paths, cl::jtRound, cl::etClosedPolygon);
-                        co.ArcTolerance = 0.1 * scale;
+                        cl::PolyTree pt;
+                        {
+                            cl::Paths paths;
+                            paths.emplace_back();
 
-                        co.Execute(solution, drill_offset * scale);
+                            double dt = 0;
+                            unsigned n_holes = (2*PI * (drill_offset/2)) / drill_diameter;
+                            auto theta = 2*PI / n_holes;
+                            if (depth % 2 == 0) {
+                                dt = theta/2;
+                            }
+                            auto t = dt;
+                            for (unsigned i = 0; i < n_holes; ++i, t += theta) {
+                                auto x = (drill_offset/2) * std::cos(t);
+                                auto y = (drill_offset/2) * std::sin(t);
+                                paths.back().push_back(scale_point({x + site->p.x, y + site->p.y}));
+                            }
 
-                        cl::Clipper clipper;
-                        clipper.AddPaths(solution, cl::ptSubject, true);
-                        clipper.AddPaths(clip, cl::ptClip, true);
-                        solution.clear();
-                        clipper.Execute(cl::ctIntersection, solution);
+                            cl::Clipper clipper;
+                            clipper.AddPaths(paths, cl::ptSubject, false);
+                            clipper.AddPaths(clip, cl::ptClip, true);
+                            clipper.Execute(cl::ctIntersection, pt);
+                        }
 
-                        if (solution == clip)
-                            break;
-
-                        for(auto& path : solution) {
-                            if (path.empty())
-                                continue;
-
-                            double dist = 0;
-                            auto last_point = unscale(*path.begin());
-                            for(auto& p : path) {
-                                dist += distance(unscale(p), last_point);
-                                last_point = unscale(p);
-
-                                if (dist > drill_diameter) {
-                                    std::cout << "G83 X" << std::fixed << last_point.x << " Y" << last_point.y << " Z-1 R1 Q0.5 F50" << '\n';
-                                    dist = 0;
-                                }
+                        for(auto node = pt.GetFirst(); node; node = node->GetNext()) {
+                            auto& path = node->Contour;
+                            for(auto& point : path) {
+                                auto p = unscale(point);
+                                std::cout << "G83 X" << std::fixed << p.x << " Y" << p.y << " Z-1 R1 Q0.5 F50" << '\n';
                             }
                             std::cout << "\n";
                         }
-    //                   std::cout << "G83 X" << std::fixed << site->p.x << " Y" << site->p.y << " Z-1 R1 Q0.5 F50" << '\n';
 
                         drill_offset += drill_diameter;
                     }
