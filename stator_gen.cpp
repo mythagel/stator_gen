@@ -79,7 +79,7 @@ void bezier_curve_to(bool abs, float x1, float y1, float x, float y) {
 
 int main() {
     std::vector<polar_point> points;
-    double r = 90/2;  // mm
+    const double r = 90/2;  // mm
 
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -92,7 +92,6 @@ int main() {
         points.push_back({r, t});
     }
 
-
     if (false) {
         std::sort(begin(points), end(points), [](const polar_point& p0, const polar_point& p1) -> bool {
             return std::tie(p0.t, p0.r) < std::tie(p1.t, p1.r);
@@ -101,7 +100,7 @@ int main() {
         for (auto& p : points) {
             auto x = p.r * std::cos(p.t);
             auto y = p.r * std::sin(p.t);
-            std::cout << "G83 X" << std::fixed << x << " Y" << y << " Z-1 R1 Q0.5 F50" << '\n';
+            std::cout << "G83 X" << r6(x) << " Y" << r6(y) << " Z-1 R1 Q0.5 F50" << '\n';
         }
         std::cout << '\n';
     } else {
@@ -151,7 +150,7 @@ int main() {
                 auto site = &sites[i];
 
                 auto first = lerp({site->edges->pos[0].x, site->edges->pos[0].y}, {site->edges->pos[1].x, site->edges->pos[1].y}, 0.5);
-                std::cout << "G0" << " X" << std::fixed << first.x << " Y" << first.y << "\n";
+                std::cout << "G0" << " X" << r6(first.x) << " Y" << r6(first.y) << "\n";
                 pos = first;
 
                 for (auto e = site->edges; e; e = e->next) {
@@ -209,20 +208,26 @@ int main() {
 
                     for(auto& path : solution) {
 
-                        std::cout << std::fixed << "G00 X" << static_cast<double>(path.begin()->X)/scale << " Y" << static_cast<double>(path.begin()->Y)/scale << "\n";
-                        for(auto& p : path) {
-                            std::cout << std::fixed << "G01 X" << static_cast<double>(p.X)/scale << " Y" << static_cast<double>(p.Y)/scale << " F50\n";
+                        auto first = unscale(*path.begin());
+                        std::cout << "G00 X" << r6(first.x) << " Y" << r6(first.y) << "\n";
+                        for(auto& point : path) {
+                            auto p = unscale(point);
+                            std::cout << "G01 X" << r6(p.x) << " Y" << r6(p.y) << " F50\n";
                         }
-                        std::cout << std::fixed << "G01 X" << static_cast<double>(path.begin()->X)/scale << " Y" << static_cast<double>(path.begin()->Y)/scale << "\n";
+                        std::cout << "G01 X" << r6(first.x) << " Y" << r6(first.y) << "\n";
                         std::cout << "\n";
                     }
                 }
             }
             if (output_drill) {
+                unsigned num_holes = 0;
+
+                // planned effective stator width is 0.5 mm
+                // holes must be at least 2x stator width
+                const double drill_diameter = 1;    // double drill diameter...
+
                 for (int i = 0; i < diagram.numsites; ++i) {
                     auto site = &sites[i];
-
-                    double drill_diameter = 1;
 
                     cl::Paths clip;
                     clip.emplace_back();
@@ -249,45 +254,63 @@ int main() {
                     cl::CleanPolygons(clip);
 
                     // random depth - number of inscribed circles for maximum voronoi cell dimensions
-                    double drill_offset = drill_diameter;
-                    for(unsigned depth = 0; depth < 100; ++depth) {
-
+                    {
                         cl::PolyTree pt;
-                        {
-                            cl::Paths paths;
-                            paths.emplace_back();
+                        cl::Paths paths;
 
-                            double dt = 0;
-                            unsigned n_holes = (2*PI * (drill_offset/2)) / drill_diameter;
+                        auto original_point = [&](const cl::IntPoint& p) -> bool {
+                            for (auto& path : paths)
+                                if (std::find(begin(path), end(path), p) != end(path))
+                                    return true;
+                            return false;
+                        };
+
+                        // Handle all depths as a single path, allows clean handling of first point
+                        paths.emplace_back();
+
+                        double inscribed_radius = 0;
+                        double inscribed_offset = drill_diameter * 2;
+                        for(unsigned depth = 0; depth < 100; ++depth) {
+
+                            //paths.emplace_back();
+
+                            unsigned n_holes = std::floor((2*PI * inscribed_radius) / inscribed_offset);
                             auto theta = 2*PI / n_holes;
-                            if (depth % 2 == 0) {
-                                dt = theta/2;
+                            double t = 0;
+
+                            if (n_holes == 0) {
+                                paths.back().push_back(scale_point({site->p.x, site->p.y}));
                             }
-                            auto t = dt;
                             for (unsigned i = 0; i < n_holes; ++i, t += theta) {
-                                auto x = (drill_offset/2) * std::cos(t);
-                                auto y = (drill_offset/2) * std::sin(t);
+                                auto x = inscribed_radius * std::cos(t);
+                                auto y = inscribed_radius * std::sin(t);
                                 paths.back().push_back(scale_point({x + site->p.x, y + site->p.y}));
                             }
-
-                            cl::Clipper clipper;
-                            clipper.AddPaths(paths, cl::ptSubject, false);
-                            clipper.AddPaths(clip, cl::ptClip, true);
-                            clipper.Execute(cl::ctIntersection, pt);
+                            inscribed_radius += inscribed_offset;
                         }
+
+                        cl::Clipper clipper;
+                        clipper.AddPaths(paths, cl::ptSubject, false);
+                        clipper.AddPaths(clip, cl::ptClip, true);
+                        clipper.Execute(cl::ctIntersection, pt);
 
                         for(auto node = pt.GetFirst(); node; node = node->GetNext()) {
                             auto& path = node->Contour;
                             for(auto& point : path) {
+                                if (!original_point(point)) continue;
                                 auto p = unscale(point);
-                                std::cout << "G83 X" << std::fixed << p.x << " Y" << p.y << " Z-1 R1 Q0.5 F50" << '\n';
+                                std::cout << "G83 X" << r6(p.x) << " Y" << r6(p.y) << " Z-1 R1 Q0.5 F50" << '\n';
+                                ++num_holes;
                             }
                             std::cout << "\n";
                         }
-
-                        drill_offset += drill_diameter;
                     }
                 }
+
+                double hole_area = PI*(drill_diameter * drill_diameter);
+                double open_area = hole_area * num_holes;
+                double stator_area = PI*r*r;
+                std::cerr << "open area: " << open_area << " closed area: " << stator_area - open_area << " open: " << (open_area / stator_area) * 100.0  << " closed: " << ((stator_area - open_area) / stator_area) * 100.0 << "%\n";
             }
         }
 
