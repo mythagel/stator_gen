@@ -77,7 +77,20 @@ void bezier_curve_to(bool abs, float x1, float y1, float x, float y) {
     std::cout << "G01 X" << r6(pos.x) << " Y" << r6(pos.y) << " F" << r6(f) << "\n";
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+    std::vector<std::string> args(argv, argv+argc);
+    args.erase(args.begin());
+
+    if (!args.empty()) {
+        if (args[0] == "profile") {
+            output_profile = true;
+            output_drill = false;
+        } else if (args[0] == "drill") {
+            output_profile = false;
+            output_drill = true;
+        }
+    }
+
     std::vector<polar_point> points;
     const double r = 90/2;  // mm
 
