@@ -92,7 +92,7 @@ int main(int argc, char* argv[]) {
     }
 
     std::vector<polar_point> points;
-    const double r = 90/2;  // mm
+    const double r = 50/2;  // mm
 
     std::random_device rd;
     std::mt19937 gen(rd());
