@@ -92,7 +92,7 @@ int main(int argc, char* argv[]) {
     }
 
     std::vector<polar_point> points;
-    const double r = 50/2;  // mm
+    const double r = (2.5*25.4)/2;  // 2.5" diameter stock
 
     std::random_device rd;
     std::mt19937 gen(rd());

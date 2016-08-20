@@ -1,6 +1,6 @@
 local cam = require("cam")
 
-local od = 50;
+local od = 2.5*25.4;
 local id = od - 4;
 local tool_r = 1/2
 
