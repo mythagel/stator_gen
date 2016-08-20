@@ -20,7 +20,6 @@
 #include "clipper.hpp"
 namespace cl = ClipperLib;
 
-
 bool output_profile = false;
 bool output_drill = true;
 
@@ -56,10 +55,10 @@ point lerp(const point& p0, const point& p1, float t) {
     return { (1-t)*p0.x + t*p1.x, (1-t)*p0.y + t*p1.y };
 }
 
-double f = 50;
 point pos;
 point bezier_cp;
 void bezier_curve_to(bool abs, float x1, float y1, float x, float y) {
+    static const double f = 200;
     point p[3];
     p[0] = pos;
     p[1] = {abs ? x1 : pos.x + x1, abs ? y1 : pos.y + y1};
@@ -222,13 +221,12 @@ int main(int argc, char* argv[]) {
                     for(auto& path : solution) {
 
                         auto first = unscale(*path.begin());
-                        std::cout << "G00 X" << r6(first.x) << " Y" << r6(first.y) << "\n";
+                        std::cout << "M " << r6(first.x) << " " << r6(first.y) << " ";
                         for(auto& point : path) {
                             auto p = unscale(point);
-                            std::cout << "G01 X" << r6(p.x) << " Y" << r6(p.y) << " F50\n";
+                            std::cout << "L " << r6(p.x) << " " << r6(p.y) << " ";
                         }
-                        std::cout << "G01 X" << r6(first.x) << " Y" << r6(first.y) << "\n";
-                        std::cout << "\n";
+                        std::cout << "L " << r6(first.x) << " " << r6(first.y) << " ";
                     }
                 }
             }
@@ -237,7 +235,7 @@ int main(int argc, char* argv[]) {
 
                 // planned effective stator width is 0.5 mm
                 // holes must be at least 2x stator width
-                const double drill_diameter = 1;    // double drill diameter...
+                const double drill_diameter = 0.5;
 
                 for (int i = 0; i < diagram.numsites; ++i) {
                     auto site = &sites[i];
@@ -312,7 +310,7 @@ int main(int argc, char* argv[]) {
                             for(auto& point : path) {
                                 if (!original_point(point)) continue;
                                 auto p = unscale(point);
-                                std::cout << "G83 X" << r6(p.x) << " Y" << r6(p.y) << " Z-1 R1 Q0.5 F50" << '\n';
+                                std::cout << "G83 X" << r6(p.x) << " Y" << r6(p.y) << " Z-1 R1 Q0.5 F200" << '\n';
                                 ++num_holes;
                             }
                             std::cout << "\n";
