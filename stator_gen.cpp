@@ -310,7 +310,7 @@ int main(int argc, char* argv[]) {
                             for(auto& point : path) {
                                 if (!original_point(point)) continue;
                                 auto p = unscale(point);
-                                std::cout << "G83 X" << r6(p.x) << " Y" << r6(p.y) << " Z-1 R1 Q0.5 F200" << '\n';
+                                std::cout << "G83 X" << r6(p.x) << " Y" << r6(p.y) << " Z-2.5 R1 Q0.5 F200" << '\n';
                                 ++num_holes;
                             }
                             std::cout << "\n";
