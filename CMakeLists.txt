@@ -10,3 +10,6 @@ SET_TARGET_PROPERTIES(polyclipping PROPERTIES VERSION 19.0.0 SOVERSION 19 )
 
 ADD_EXECUTABLE(stator_gen stator_gen.cpp)
 TARGET_LINK_LIBRARIES(stator_gen polyclipping)
+
+ADD_EXECUTABLE(body_profile body_profile.cpp)
+TARGET_LINK_LIBRARIES(body_profile polyclipping)
