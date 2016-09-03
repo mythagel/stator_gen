@@ -188,7 +188,7 @@ int main(int argc, char* argv[]) {
                 circle_clip.push_back(scale_point({x + r, y + r}));
             }
 
-            double offset = -1.5;
+            double offset = -1.0;
 
             if (output_profile) {
                 for (int i = 0; i < diagram.numsites; ++i) {
